@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cloud-exec"
+version = "0.1.0"
+description = "腾讯云执行层封装(CVM 开实例/TAT 命令/COS 存储)，纯标准库零依赖，与 DockBuddy 解耦"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "DockBuddy" }]
+keywords = ["tencent-cloud", "cvm", "tat", "cos", "orchestration"]
+dependencies = []
+
+[project.urls]
+Repository = "https://pypi.cnb.cool/vcinex/bioinfo/-/packages/simple"
+
+[tool.setuptools.packages.find]
+include = ["cloud_exec*"]
