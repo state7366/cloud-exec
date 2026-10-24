@@ -24,7 +24,11 @@ class CosClient:
         self.region = region
         self.scheme = scheme
         # endpoint 空 = 公网默认(bucket.cos.region.myqcloud.com); 内网填 cos.<region>.tencentcos.cn
-        self.endpoint = endpoint or f"{bucket}.cos.{region}.myqcloud.com"
+        # (bucket 作为子域名 <bucket>.cos.<region>.tencentcos.cn 拼到前面, 与 qcloud_cos SDK 同口径)
+        ep = endpoint or f"{bucket}.cos.{region}.myqcloud.com"
+        if "tencentcos.cn" in ep and not ep.startswith(f"{bucket}."):
+            ep = f"{bucket}.{ep}"
+        self.endpoint = ep
         if secret_id:
             self.secret_id, self.secret_key = secret_id, secret_key
         else:
