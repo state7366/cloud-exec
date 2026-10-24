@@ -13,9 +13,10 @@
 from .auth import load_credentials, tc3_signature, tencent_call
 from .cos import CosClient
 from .cvm import CvmClient
+from .disks import DiskClient
 from .tat import TatClient
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
-__all__ = ["CvmClient", "TatClient", "CosClient",
+__all__ = ["CvmClient", "TatClient", "CosClient", "DiskClient",
            "load_credentials", "tc3_signature", "tencent_call", "__version__"]
