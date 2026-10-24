@@ -13,6 +13,7 @@ COS multipart(qcloud_cos)为可选依赖, 懒加载 —— n8n 沙箱等无第�
     cvm.terminate(info["instance_id"])
 """
 from .auth import load_credentials, tc3_signature, tencent_call
+from .billing import BillingClient
 from .cos import CosClient
 from .cvm import CvmClient
 from .disks import DiskClient
@@ -22,4 +23,5 @@ from .tat import TatClient
 __version__ = "0.3.0"
 
 __all__ = ["CvmClient", "TatClient", "CosClient", "SshClient", "DiskClient",
+           "BillingClient",
            "load_credentials", "tc3_signature", "tencent_call", "__version__"]
