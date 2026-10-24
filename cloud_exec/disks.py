@@ -19,12 +19,13 @@ CBS_VERSION = "2017-03-12"
 
 class DiskClient:
     def __init__(self, region: str = "ap-shanghai", secret_id: str = "",
-                 secret_key: str = "", tat=None):
-        """tat: 可选的 TatClient(实例端 mount 下发命令用); None 则只做 CBS 侧操作。"""
+                 secret_key: str = "", tat=None, ssh=None):
+        """tat: 可选的 TatClient；ssh: 可选的 SshClient。mount_on_instance 二选一。"""
         self.region = region
         self.secret_id = secret_id
         self.secret_key = secret_key
         self.tat = tat
+        self.ssh = ssh
 
     def _call(self, action, payload):
         return tencent_call("cbs", CBS_HOST, CBS_VERSION, action, payload,
@@ -83,18 +84,8 @@ class DiskClient:
         """销毁数据盘(UNATTACHED 才可销毁)。"""
         return self._call("TerminateDisks", {"DiskIds": [disk_id]})
 
-    # ---- 实例端 mount(经 TAT) ----
-    def mount_on_instance(self, instance_id: str, mount_point: str = "/data",
-                          models_link: Optional[str] = None,
-                          timeout: int = 600) -> dict:
-        """实例端: 找数据盘设备 → 格式化(仅首次) → mount → 可选 models 软链。
-
-        models_link: 需软链到数据盘的本地目录(如 /home/ubuntu/dockbuddy/models),
-        非空则 `ln -sfn {mount_point}/models {models_link}`。
-        返回 TAT run_and_wait 的结果。
-        """
-        if self.tat is None:
-            raise RuntimeError("[disks] mount_on_instance 需要 TatClient")
+    # ---- 实例端 mount(SSH 或 TAT 二选一) ----
+    def _mount_script(self, mount_point: str, models_link: Optional[str]) -> str:
         softlink = ""
         if models_link:
             softlink = f"""
@@ -108,7 +99,7 @@ fi
 mkdir -p {mount_point}/models
 ln -sfn {mount_point}/models {models_link}
 """
-        script = f"""
+        return f"""
 set -e
 sudo mkdir -p {mount_point}
 if ! mountpoint -q {mount_point}; then
@@ -123,12 +114,31 @@ fi
 {softlink}
 df -h {mount_point} | tail -1
 """
+
+    def mount_on_instance(self, instance_id: str, mount_point: str = "/data",
+                          models_link: Optional[str] = None, ip: str = "",
+                          timeout: int = 600) -> dict:
+        """实例端: 找数据盘设备 → 格式化(仅首次) → mount → 可选 models 软链。
+
+        models_link: 需软链到数据盘的本地目录(如 /home/ubuntu/dockbuddy/models),
+        非空则 `ln -sfn {mount_point}/models {models_link}`。
+        通道: 有 ssh + ip → SSH; 否则 TAT(需 tat)。标准镜像无 TAT agent 时用 SSH。
+        返回 {"output": ...} 或 TAT run_and_wait 的结果。
+        """
+        script = self._mount_script(mount_point, models_link)
+        if self.ssh is not None and ip:
+            rc, out, err = self.ssh.ssh_run(ip, script, timeout=timeout, echo=True)
+            if rc != 0:
+                raise RuntimeError(f"[disks] 实例端挂载失败 rc={rc}: {out[-500:]} {err[-300:]}")
+            return {"output": out}
+        if self.tat is None:
+            raise RuntimeError("[disks] mount_on_instance 需要 TatClient 或 SshClient(+ip)")
         return self.tat.run_and_wait(instance_id, script, timeout=timeout)
 
     def ensure(self, name: str, instance_id: str, mount_point: str = "/data",
                models_link: Optional[str] = None, size: int = 200,
                disk_type: str = "CLOUD_SSD", zone: str = "ap-shanghai-2",
-               timeout: int = 600) -> str:
+               ip: str = "", timeout: int = 600) -> str:
         """一站式: 找到/创建盘 → 挂载到实例 → 实例端 mount + 软链。返回 disk_id。"""
         d = self.find_by_name(name)
         if d:
@@ -140,7 +150,7 @@ df -h {mount_point} | tail -1
                     break
                 time.sleep(3)
         self.attach(disk_id, instance_id)
-        self.mount_on_instance(instance_id, mount_point, models_link, timeout)
+        self.mount_on_instance(instance_id, mount_point, models_link, ip, timeout)
         return disk_id
 
 

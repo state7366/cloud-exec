@@ -68,13 +68,37 @@ class CosClient:
                 raise RuntimeError(f"COS PUT {resp.status}")
 
     def download(self, key: str, dest_path: str) -> None:
-        """下载对象到本地文件。"""
+        """下载对象到本地文件（纯标准库，流式分块写，不整读入内存）。"""
         os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
         req = request.Request(self._url(key), headers={"Authorization": self._sign("get", key)},
                               method="GET")
         with request.urlopen(req, timeout=600) as resp:
             with open(dest_path, "wb") as f:
-                f.write(resp.read())
+                for chunk in iter(lambda: resp.read(1 << 20), b""):
+                    f.write(chunk)
+
+    def download_file(self, key: str, dest_path: str, min_bytes: int = 1) -> bool:
+        """流式下载到 dest_path；已存在且 >=min_bytes 跳过（幂等），返回是否真正下载。"""
+        if os.path.isfile(dest_path) and os.path.getsize(dest_path) >= min_bytes:
+            return False
+        self.download(key, dest_path)
+        return True
+
+    def upload_file(self, key: str, local_path: str) -> None:
+        """上传本地文件到 COS（qcloud_cos SDK 懒加载，自动 multipart 分片）。
+
+        多 GB 大文件用 SDK 的 multipart（断点续传）；小文件也走这里（SDK 自动单次 PUT）。
+        paramiko 类可选依赖：qcloud_cos 仅在真正上传时 import。
+        """
+        from qcloud_cos import CosConfig as QCosConfig
+        from qcloud_cos import CosS3Client
+        kw = dict(Region=self.region, SecretId=self.secret_id, SecretKey=self.secret_key,
+                  Scheme=self.scheme)
+        # 内网 endpoint（tencentcos.cn）才显式传；公网默认域名走 SDK 默认 endpoint
+        if self.endpoint and "tencentcos.cn" in self.endpoint:
+            kw["Endpoint"] = self.endpoint
+        CosS3Client(QCosConfig(**kw)).upload_file(
+            Bucket=self.bucket, Key=key, LocalFilePath=local_path)
 
     def get_bytes(self, key: str) -> bytes:
         req = request.Request(self._url(key), headers={"Authorization": self._sign("get", key)},
@@ -91,3 +115,17 @@ class CosClient:
                 return int(resp.headers.get("Content-Length", 0) or 0)
         except Exception:  # noqa: BLE001
             return -1
+
+    def head_etag(self, key: str) -> str:
+        """查对象 ETag(去引号); 不存在返回 ''。
+
+        单文件 PUT 的 ETag = 文件 MD5(可直接对比); multipart 分片上传的 ETag =
+        '<md5>-<片数>'(复合值, 无法直接对比) —— 调用方遇 '-' 应视为「未知, 必须重传」。
+        """
+        req = request.Request(self._url(key), headers={"Authorization": self._sign("head", key)},
+                              method="HEAD")
+        try:
+            with request.urlopen(req, timeout=60) as resp:
+                return (resp.headers.get("ETag", "") or "").strip('"')
+        except Exception:  # noqa: BLE001
+            return ""
