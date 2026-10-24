@@ -254,6 +254,34 @@ class SshClient:
                     print(f"[sftp][warn] {rp} 单文件耗时 {dt:.0f}s(>{_SLOW_PUT_S}s), "
                           f"连接可能已劣化", flush=True)
 
+    def sftp_get(self, ip: str, remote: str, local: str) -> None:
+        """sftp 下载单个文件（自动建本地父目录；传输层抖动自动重试）。"""
+        import os
+        last = None
+        for attempt in range(_SFTP_RETRIES):
+            try:
+                c = self._connect(ip)
+                try:
+                    sftp = c.open_sftp()
+                    sftp.get_channel().settimeout(_SFTP_IO_TIMEOUT)
+                    parent = os.path.dirname(local)
+                    if parent:
+                        os.makedirs(parent, exist_ok=True)
+                    sftp.get(remote, local)
+                    sftp.close()
+                finally:
+                    c.close()
+                return
+            except Exception as e:  # noqa: BLE001
+                last = e
+                if not self._is_transient(e) or attempt == _SFTP_RETRIES - 1:
+                    raise
+                wait = _SFTP_BACKOFF[min(attempt, len(_SFTP_BACKOFF) - 1)]
+                print(f"[sftp] 抖动重试 {attempt + 1}/{_SFTP_RETRIES - 1}: "
+                      f"{type(e).__name__}; {wait}s 后重拉 {os.path.basename(remote)}", flush=True)
+                time.sleep(wait)
+        raise last
+
     def sftp_put(self, ip: str, local: str, remote: str) -> None:
         """sftp 上传单个文件（自动建父目录；传输层抖动自动重试）。"""
         import os

@@ -101,3 +101,58 @@ class CvmClient:
     def terminate(self, instance_id: str) -> dict:
         """释放实例(退还, 立即停止计费)。"""
         return self._call("TerminateInstances", {"InstanceIds": [instance_id]})
+
+    def stop(self, instance_id: str, timeout: int = 480) -> None:
+        """软关机(StopType=SOFT) + 轮询到 STOPPED。制镜像前调用。"""
+        cur = self.describe(instance_id)
+        if cur.get("InstanceState") == "RUNNING":
+            self._call("StopInstances", {"InstanceIds": [instance_id], "StopType": "SOFT"})
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                if self.describe(instance_id).get("InstanceState") == "STOPPED":
+                    return
+                time.sleep(8)
+            raise RuntimeError(f"[cvm] stop {instance_id} 超时")
+
+    def create_image(self, instance_id: str, name: str, description: str = "",
+                     timeout: int = 4800) -> str:
+        """对已停机实例制镜像 + 轮询到 NORMAL, 返回 image_id。"""
+        payload = {"ImageName": name, "InstanceId": instance_id,
+                   "ImageDescription": description, "ForcePoweroff": "false"}
+        r = self._call("CreateImage", payload)
+        img = r.get("ImageId", "")
+        if not img:
+            raise RuntimeError(f"[cvm] CreateImage 未返回 ImageId: {r}")
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            im = self.describe_image(img)
+            st = im.get("ImageState") if im else "?"
+            if st == "NORMAL":
+                return img
+            if st == "CREATEFAILED":
+                raise RuntimeError("[cvm] 制镜像失败")
+            time.sleep(20)
+        raise RuntimeError(f"[cvm] 制镜像等待超时: {img}")
+
+    def describe_image(self, image_id: str) -> dict:
+        """查镜像, 返回 ImageSet[0] 或 {}。"""
+        r = self._call("DescribeImages", {"ImageIds": [image_id]})
+        return (r.get("ImageSet") or [{}])[0]
+
+    def run_instances(self, payload: dict) -> list:
+        """底层 RunInstances（单次精确创建），返回 InstanceIdSet 列表。
+
+        供上层 provider 适配器（pipeline/adapters/cloud.py）做可插拔封装；高层开实例
+        用 open()（竞价优先回退按量）。
+        """
+        r = self._call("RunInstances", payload)
+        return list(r.get("InstanceIdSet") or [])
+
+    def describe_instances(self, instance_ids: list) -> list:
+        """批量查询，返回 InstanceSet（腾讯云 API 原始 dict 列表）。"""
+        r = self._call("DescribeInstances", {"InstanceIds": list(instance_ids)})
+        return list(r.get("InstanceSet") or [])
+
+    def terminate_instances(self, instance_ids: list) -> dict:
+        """批量释放实例。"""
+        return self._call("TerminateInstances", {"InstanceIds": list(instance_ids)})
