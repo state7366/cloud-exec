@@ -17,11 +17,13 @@ from .billing import BillingClient
 from .cos import CosClient
 from .cvm import CvmClient
 from .disks import DiskClient
+from .exec import PyExecClient
+from .net import dns_a, patch_dns
 from .ssh import SshClient
 from .tat import TatClient
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = ["CvmClient", "TatClient", "CosClient", "SshClient", "DiskClient",
-           "BillingClient",
+           "BillingClient", "PyExecClient", "dns_a", "patch_dns",
            "load_credentials", "tc3_signature", "tencent_call", "__version__"]

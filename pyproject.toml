@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cloud-exec"
-version = "0.3.0"
+version = "0.4.0"
 description = "腾讯云执行层封装(CVM/TAT/COS/CBS/SSH)，核心纯标准库零依赖，SSH/COS multipart 为可选依赖懒加载，与 DockBuddy 解耦"
 readme = "README.md"
 requires-python = ">=3.8"
